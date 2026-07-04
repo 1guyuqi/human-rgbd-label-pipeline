@@ -1,5 +1,9 @@
 # Copy to config/paths.yaml and set absolute paths on your machine.
-# Alternatively export environment variables: TOOL_COTRACKER_CKPT, etc.
+# Alternatively export environment variables: TOOL_COTRACKER_CKPT, RECORD_ROOT, etc.
+
+# Optional local RGB-D dataset roots (for --only_3d remapping / depth fallback):
+# record_root: /path/to/Record
+# recorded_rgbd_root: /path/to/recorded_rgbd
 
 cotracker_ckpt: /path/to/co-tracker/checkpoints/cotracker_stride_8_wind_16.pth
 sam2_checkpoint: /path/to/sam2/checkpoints/sam2.1_hiera_large.pt

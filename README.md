@@ -182,17 +182,17 @@ This verifies the 3D export path and checks:
 If you generated `pcd.npy` before the kpst/pcd SE(3) fix, re-run 3D only (2D caches unchanged):
 
 ```bash
-# Mount UBU disk first, then:
-export RECORD_ROOT=/media/ljx/UBU/data/Record
+export RECORD_ROOT=/path/to/Record
+export RECORDED_RGBD_ROOT=/path/to/recorded_rgbd   # optional alias / fallback
 
 bash scripts/batch_recompute_3d.sh
 # or single task:
 cd rvideo && python label_gen.py \
   --save_root /path/to/process_data/TASK \
-  --only_3d --recompute_3d --record_root "$RECORD_ROOT"
+  --only_3d --recompute_3d \
+  --record_root "$RECORD_ROOT" \
+  --recorded_rgbd_root "$RECORDED_RGBD_ROOT"
 ```
-
-GitHub hosts the public repo; keep a local clone as your working copy for re-runs.
 
 ## Related repos
 

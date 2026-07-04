@@ -906,13 +906,43 @@ def discover_gt_task_roots(root: str) -> list[str]:
     return sorted(roots)
 
 
-DEPTH_BASE_FP_ALIASES = (
-    ("/media/ljx/UBU/data/recorded_rgbd/", "/media/ljx/UBU/data/Record/"),
-)
+def _dataset_roots(
+    record_root: str | None = None,
+    recorded_rgbd_root: str | None = None,
+) -> tuple[str | None, str | None]:
+    rr = (record_root or os.environ.get("RECORD_ROOT") or "").strip() or None
+    rgbd = (recorded_rgbd_root or os.environ.get("RECORDED_RGBD_ROOT") or "").strip() or None
+    return rr, rgbd
 
-RECORD_ROOT_PREFIXES = (
-    "/media/ljx/UBU/data/Record",
-)
+
+def _alias_traj_candidates(
+    norm: str,
+    record_root: str | None,
+    recorded_rgbd_root: str | None,
+) -> list[str]:
+    """Swap traj root between Record and recorded_rgbd trees when both roots are configured."""
+    out: list[str] = []
+    if not record_root or not recorded_rgbd_root:
+        return out
+    record_n = os.path.normpath(record_root)
+    rgbd_n = os.path.normpath(recorded_rgbd_root)
+    if norm == record_n or norm.startswith(record_n + os.sep):
+        rel = norm[len(record_n):].lstrip(os.sep)
+        out.append(os.path.join(rgbd_n, rel))
+    elif norm == rgbd_n or norm.startswith(rgbd_n + os.sep):
+        rel = norm[len(rgbd_n):].lstrip(os.sep)
+        out.append(os.path.join(record_n, rel))
+    return out
+
+
+def _record_segment_remap(norm: str, record_root: str) -> str | None:
+    """Map .../Record/<rel> in clip JSON to RECORD_ROOT/<rel> (any mount prefix)."""
+    marker = os.sep + "Record" + os.sep
+    idx = norm.find(marker)
+    if idx < 0:
+        return None
+    rel = norm[idx + len(marker):]
+    return os.path.join(os.path.normpath(record_root), rel)
 
 
 def _symlink_record_candidates(traj_dir: str, record_root: str | None) -> list[str]:
@@ -926,21 +956,10 @@ def _symlink_record_candidates(traj_dir: str, record_root: str | None) -> list[s
     if not os.path.isabs(target):
         target = os.path.normpath(os.path.join(os.path.dirname(cam), target))
     target = os.path.normpath(target)
-    record_root = os.path.normpath(record_root)
-    marker = os.sep + "Record" + os.sep
-    idx = target.find(marker)
-    if idx >= 0:
-        rel = target[idx + len(marker):]
-        return [os.path.dirname(os.path.join(record_root, rel))]
-    out: list[str] = []
-    for prefix in ("/media/ljx/UBU/data/Record",):
-        pnorm = os.path.normpath(prefix)
-        pmarker = pnorm + os.sep
-        if target.startswith(pmarker):
-            rel = target[len(pmarker):]
-            out.append(os.path.dirname(os.path.join(record_root, rel)))
-            break
-    return out
+    remapped = _record_segment_remap(target, record_root)
+    if remapped is None:
+        return []
+    return [os.path.dirname(remapped)]
 
 
 def _traj_root_ready(traj_dir: str) -> bool:
@@ -955,29 +974,22 @@ def _missing_raw_hint(base_fp: str) -> str:
     return base_fp
 
 
-def resolve_traj_root(base_fp: str, record_root: str | None = None) -> str | None:
+def resolve_traj_root(
+    base_fp: str,
+    record_root: str | None = None,
+    recorded_rgbd_root: str | None = None,
+) -> str | None:
     """Return traj folder with camera_in.npy; prefer the path stored in clip JSON."""
     candidates: list[str] = []
     norm = os.path.normpath(base_fp)
+    record_root, recorded_rgbd_root = _dataset_roots(record_root, recorded_rgbd_root)
 
     candidates.append(norm)
-    for src, dst in DEPTH_BASE_FP_ALIASES:
-        src_n = os.path.normpath(src)
-        dst_n = os.path.normpath(dst)
-        if norm.startswith(src_n):
-            candidates.append(os.path.normpath(dst_n + norm[len(src_n):]))
-        elif norm.startswith(dst_n):
-            candidates.append(os.path.normpath(src_n + norm[len(dst_n):]))
-
+    candidates.extend(_alias_traj_candidates(norm, record_root, recorded_rgbd_root))
     if record_root:
-        record_root = os.path.normpath(record_root)
-        for prefix in RECORD_ROOT_PREFIXES:
-            pnorm = os.path.normpath(prefix)
-            if norm == pnorm or norm.startswith(pnorm + os.sep):
-                rel = norm[len(pnorm):].lstrip(os.sep)
-                candidates.append(os.path.join(record_root, rel))
-                break
-
+        remapped = _record_segment_remap(norm, record_root)
+        if remapped:
+            candidates.append(remapped)
     candidates.extend(_symlink_record_candidates(norm, record_root))
 
     seen: set[str] = set()
@@ -990,21 +1002,17 @@ def resolve_traj_root(base_fp: str, record_root: str | None = None) -> str | Non
     return None
 
 
-def depth_base_fp_candidates(base_fp: str) -> list[str]:
+def depth_base_fp_candidates(
+    base_fp: str,
+    record_root: str | None = None,
+    recorded_rgbd_root: str | None = None,
+) -> list[str]:
     out = [base_fp]
     norm = os.path.normpath(base_fp)
-    for src, dst in DEPTH_BASE_FP_ALIASES:
-        src_n = os.path.normpath(src)
-        dst_n = os.path.normpath(dst)
-        if norm.startswith(src_n):
-            alt = os.path.normpath(dst_n + norm[len(src_n):])
-        elif norm.startswith(dst_n):
-            alt = os.path.normpath(src_n + norm[len(dst_n):])
-        else:
-            continue
+    record_root, recorded_rgbd_root = _dataset_roots(record_root, recorded_rgbd_root)
+    for alt in _alias_traj_candidates(norm, record_root, recorded_rgbd_root):
         if alt not in out and os.path.isdir(alt):
             out.append(alt)
-        break
     return out
 
 
@@ -1036,13 +1044,19 @@ def _load_depth_uint16_from_root(
     return dep.astype(np.uint16)
 
 
-def load_depth_uint16(base_fp: str, frame_idx: int, use_refined_depth: bool = False) -> np.ndarray:
+def load_depth_uint16(
+    base_fp: str,
+    frame_idx: int,
+    use_refined_depth: bool = False,
+    record_root: str | None = None,
+    recorded_rgbd_root: str | None = None,
+) -> np.ndarray:
     """
     Load depth as uint16 millimeters for GT 3D back-projection / RGBD.
     Tries alias roots (recorded_rgbd <-> Record) when a frame is missing.
     """
     last_err: FileNotFoundError | None = None
-    for cand in depth_base_fp_candidates(base_fp):
+    for cand in depth_base_fp_candidates(base_fp, record_root, recorded_rgbd_root):
         try:
             return _load_depth_uint16_from_root(cand, frame_idx, use_refined_depth=use_refined_depth)
         except FileNotFoundError as exc:
@@ -1574,7 +1588,10 @@ def kpst_label_gen_demo_3d(args):
     clip_list = []
     n_skip_incomplete = 0
     n_skip_missing_raw = 0
-    record_root = getattr(args, "record_root", None) or os.environ.get("RECORD_ROOT")
+    record_root, recorded_rgbd_root = _dataset_roots(
+        getattr(args, "record_root", None),
+        getattr(args, "recorded_rgbd_root", None),
+    )
     if use_refined_depth:
         print("[3D] using LingBot refined depth (depth_refined_*.png/npy)")
     for _, clip_org in tqdm(enumerate(org_clip_list)):
@@ -1594,7 +1611,7 @@ def kpst_label_gen_demo_3d(args):
             continue
 
         base_fp_orig = clip_org['index']
-        base_fp = resolve_traj_root(base_fp_orig, record_root)
+        base_fp = resolve_traj_root(base_fp_orig, record_root, recorded_rgbd_root)
         if base_fp is None:
             n_skip_missing_raw += 1
             print(f"[Skip] raw RGB-D not found: {_missing_raw_hint(base_fp_orig)}")
@@ -1610,7 +1627,10 @@ def kpst_label_gen_demo_3d(args):
 
         # use REAL image size from depth (or rgb) to build intrinsic
         st = int(clip_org['st'])
-        dep0 = load_depth_uint16(base_fp, st, use_refined_depth=use_refined_depth)
+        dep0 = load_depth_uint16(
+            base_fp, st, use_refined_depth=use_refined_depth,
+            record_root=record_root, recorded_rgbd_root=recorded_rgbd_root,
+        )
         H0, W0 = dep0.shape[:2]
 
         print("dep dtype:", dep0.dtype, "min:", dep0.min(), "max:", dep0.max(),
@@ -1683,7 +1703,10 @@ def kpst_label_gen_demo_3d(args):
 
         for img_idx, t in zip(seq_idx_list, range(kps_vis.shape[1])):
             pos = kps_pos[:, t]  # (N,2) in (w,h)
-            dep = load_depth_uint16(base_fp, img_idx, use_refined_depth=use_refined_depth)
+            dep = load_depth_uint16(
+                base_fp, img_idx, use_refined_depth=use_refined_depth,
+                record_root=record_root, recorded_rgbd_root=recorded_rgbd_root,
+            )
             Hd, Wd = dep.shape[:2]
 
             # IMPORTANT: int32 (avoid uint16 wrap if negative)
@@ -1777,7 +1800,10 @@ def kpst_label_gen_demo_3d(args):
 
 
         # ---- build 3D scene pcd for first frame only ----
-        dep = load_depth_uint16(base_fp, st, use_refined_depth=use_refined_depth)
+        dep = load_depth_uint16(
+            base_fp, st, use_refined_depth=use_refined_depth,
+            record_root=record_root, recorded_rgbd_root=recorded_rgbd_root,
+        )
         color_raw = o3d.io.read_image(os.path.join(base_fp, f"rgb_{st}.png"))
 
 
@@ -2118,8 +2144,13 @@ if __name__ == "__main__":
         '--record_root',
         type=str,
         default=None,
-        help='Remap /media/ljx/UBU/data/Record to this path when the UBU disk is mounted elsewhere '
-             '(or set env RECORD_ROOT)',
+        help='Local Record dataset root (or env RECORD_ROOT). Remaps .../Record/<rel> in clip JSON.',
+    )
+    parser.add_argument(
+        '--recorded_rgbd_root',
+        type=str,
+        default=None,
+        help='Local recorded_rgbd root (or env RECORDED_RGBD_ROOT) for alias / depth fallback.',
     )
     args = parser.parse_args()
 
