@@ -192,12 +192,6 @@ cd rvideo && python label_gen.py \
   --only_3d --recompute_3d --record_root "$RECORD_ROOT"
 ```
 
-Local copy under `~/文档/work/general_flow/`:
-
-```bash
-bash ~/文档/work/general_flow/scripts/recompute_3d_all.sh
-```
-
 GitHub hosts the public repo; keep a local clone as your working copy for re-runs.
 
 ## Related repos
