@@ -912,7 +912,6 @@ DEPTH_BASE_FP_ALIASES = (
 
 RECORD_ROOT_PREFIXES = (
     "/media/ljx/UBU/data/Record",
-    "/media/ljx/UBU/data/recorded_rgbd",
 )
 
 
@@ -934,7 +933,7 @@ def _symlink_record_candidates(traj_dir: str, record_root: str | None) -> list[s
         rel = target[idx + len(marker):]
         return [os.path.dirname(os.path.join(record_root, rel))]
     out: list[str] = []
-    for prefix in RECORD_ROOT_PREFIXES:
+    for prefix in ("/media/ljx/UBU/data/Record",):
         pnorm = os.path.normpath(prefix)
         pmarker = pnorm + os.sep
         if target.startswith(pmarker):
@@ -957,19 +956,9 @@ def _missing_raw_hint(base_fp: str) -> str:
 
 
 def resolve_traj_root(base_fp: str, record_root: str | None = None) -> str | None:
-    """Return the first traj folder that contains a readable camera_in.npy."""
+    """Return traj folder with camera_in.npy; prefer the path stored in clip JSON."""
     candidates: list[str] = []
     norm = os.path.normpath(base_fp)
-
-    candidates.extend(_symlink_record_candidates(norm, record_root))
-
-    if record_root:
-        record_root = os.path.normpath(record_root)
-        for prefix in RECORD_ROOT_PREFIXES:
-            pnorm = os.path.normpath(prefix)
-            if norm == pnorm or norm.startswith(pnorm + os.sep):
-                rel = norm[len(pnorm):].lstrip(os.sep)
-                candidates.append(os.path.join(record_root, rel))
 
     candidates.append(norm)
     for src, dst in DEPTH_BASE_FP_ALIASES:
@@ -979,6 +968,17 @@ def resolve_traj_root(base_fp: str, record_root: str | None = None) -> str | Non
             candidates.append(os.path.normpath(dst_n + norm[len(src_n):]))
         elif norm.startswith(dst_n):
             candidates.append(os.path.normpath(src_n + norm[len(dst_n):]))
+
+    if record_root:
+        record_root = os.path.normpath(record_root)
+        for prefix in RECORD_ROOT_PREFIXES:
+            pnorm = os.path.normpath(prefix)
+            if norm == pnorm or norm.startswith(pnorm + os.sep):
+                rel = norm[len(pnorm):].lstrip(os.sep)
+                candidates.append(os.path.join(record_root, rel))
+                break
+
+    candidates.extend(_symlink_record_candidates(norm, record_root))
 
     seen: set[str] = set()
     for cand in candidates:
@@ -994,39 +994,38 @@ def depth_base_fp_candidates(base_fp: str) -> list[str]:
     out = [base_fp]
     norm = os.path.normpath(base_fp)
     for src, dst in DEPTH_BASE_FP_ALIASES:
-        if norm.startswith(src):
-            alt = os.path.normpath(dst + norm[len(src):])
-            if alt not in out and os.path.isdir(alt):
-                out.append(alt)
-            break
+        src_n = os.path.normpath(src)
+        dst_n = os.path.normpath(dst)
+        if norm.startswith(src_n):
+            alt = os.path.normpath(dst_n + norm[len(src_n):])
+        elif norm.startswith(dst_n):
+            alt = os.path.normpath(src_n + norm[len(dst_n):])
+        else:
+            continue
+        if alt not in out and os.path.isdir(alt):
+            out.append(alt)
+        break
     return out
 
 
-def load_depth_uint16(base_fp: str, frame_idx: int, use_refined_depth: bool = False) -> np.ndarray:
-    """
-    Load depth as uint16 millimeters for GT 3D back-projection / RGBD.
-    Prefers depth_refined_* when use_refined_depth=True.
-    """
+def _load_depth_uint16_from_root(
+    base_fp: str, frame_idx: int, use_refined_depth: bool = False,
+) -> np.ndarray:
     idx = int(frame_idx)
     raw_png = os.path.join(base_fp, f"depth_{idx}.png")
 
     if use_refined_depth:
-        for cand in depth_base_fp_candidates(base_fp):
-            refined_png = os.path.join(cand, f"depth_refined_{idx}.png")
-            refined_npy = os.path.join(cand, f"depth_refined_{idx}.npy")
-            if os.path.isfile(refined_png):
-                dep = np.asarray(Image.open(refined_png))
-                break
-            if os.path.isfile(refined_npy):
-                depth_m = np.load(refined_npy).astype(np.float32)
-                dep = np.clip(depth_m * 1000.0, 0, 65535).astype(np.uint16)
-                break
+        refined_png = os.path.join(base_fp, f"depth_refined_{idx}.png")
+        refined_npy = os.path.join(base_fp, f"depth_refined_{idx}.npy")
+        if os.path.isfile(refined_png):
+            dep = np.asarray(Image.open(refined_png))
+        elif os.path.isfile(refined_npy):
+            depth_m = np.load(refined_npy).astype(np.float32)
+            dep = np.clip(depth_m * 1000.0, 0, 65535).astype(np.uint16)
+        elif os.path.isfile(raw_png):
+            dep = np.asarray(Image.open(raw_png))
         else:
-            if os.path.isfile(raw_png):
-                print(f"[WARN] refined depth missing, fallback raw: {raw_png}")
-                dep = np.asarray(Image.open(raw_png))
-            else:
-                raise FileNotFoundError(f"No depth for frame {idx} under {base_fp}")
+            raise FileNotFoundError(f"No depth for frame {idx} under {base_fp}")
     elif os.path.isfile(raw_png):
         dep = np.asarray(Image.open(raw_png))
     else:
@@ -1035,6 +1034,23 @@ def load_depth_uint16(base_fp: str, frame_idx: int, use_refined_depth: bool = Fa
     if dep.ndim == 3:
         dep = dep[..., 0]
     return dep.astype(np.uint16)
+
+
+def load_depth_uint16(base_fp: str, frame_idx: int, use_refined_depth: bool = False) -> np.ndarray:
+    """
+    Load depth as uint16 millimeters for GT 3D back-projection / RGBD.
+    Tries alias roots (recorded_rgbd <-> Record) when a frame is missing.
+    """
+    last_err: FileNotFoundError | None = None
+    for cand in depth_base_fp_candidates(base_fp):
+        try:
+            return _load_depth_uint16_from_root(cand, frame_idx, use_refined_depth=use_refined_depth)
+        except FileNotFoundError as exc:
+            last_err = exc
+            continue
+    if last_err is not None:
+        raise last_err
+    raise FileNotFoundError(f"depth_{int(frame_idx)}.png not found under {base_fp}")
 
 
 def refine_lid_mask(mask: np.ndarray, top_ratio: float = 0.28) -> np.ndarray:
