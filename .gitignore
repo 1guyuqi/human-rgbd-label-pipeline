@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Pipeline outputs (large)
+output/
+data/
+json_cache/
+cache/
+*.pkl
+*.ply
+*.mp4
+
+# Local tool configs (keep *.example.yaml)
+config/paths.yaml
+
+# Model checkpoints (download separately)
+checkpoints/
+weights/
+tool_repos/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store

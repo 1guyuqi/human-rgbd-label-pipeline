@@ -1,0 +1,12 @@
+numpy
+opencv-python
+Pillow
+tqdm
+scipy
+pandas
+open3d
+plyfile
+pyyaml
+torch
+torchvision
+matplotlib

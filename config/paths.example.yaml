@@ -1,0 +1,10 @@
+# Copy to config/paths.yaml and set absolute paths on your machine.
+# Alternatively export environment variables: TOOL_COTRACKER_CKPT, etc.
+
+cotracker_ckpt: /path/to/co-tracker/checkpoints/cotracker_stride_8_wind_16.pth
+sam2_checkpoint: /path/to/sam2/checkpoints/sam2.1_hiera_large.pt
+sam2_config: /path/to/sam2/configs/sam2.1/sam2.1_hiera_l.yaml
+groundingdino_config: /path/to/GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py
+groundingdino_ckpt: /path/to/GroundingDINO/checkpoint/groundingdino_swint_ogc.pth
+hand_detector_cfg: /path/to/hand_object_detector/cfgs/res101.yml
+hand_detector_ckpt: /path/to/hand_object_detector/models/faster_rcnn_1_8_132028.pth
