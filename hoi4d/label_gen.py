@@ -51,9 +51,9 @@ cls_name = {
 }
 large_static_multipart = ['Storage Furniture', 'Laptop', 'Safe', 'Trash Can', 'Bucket']
 
-# CUDA_VISIBLE_DEVICES=0 python label_gen.py --data_root  \
-# --anno_root  --idx_file 
-# --output_root ""
+# CUDA_VISIBLE_DEVICES=0 python label_gen.py --data_root /media/ljx/UBU/data/HOI4D/HOI4D_release \
+# --anno_root /media/ljx/UBU/data/HOI4D/HOI4D_annotations --idx_file /media/ljx/UBU/data/HOI4D/HOI4D-Instructions/release.txt\
+# --output_root "/home/ljx/文档/work/general_flow/process_data/HOI4D"
 
 
 def _stat_spcd(name, spcd, ids=None):
@@ -64,6 +64,7 @@ def _stat_spcd(name, spcd, ids=None):
     uniq, cnt = np.unique(mid, return_counts=True)
     total = int(spcd.shape[0])
     print(f"[{name}] total={total}, uniq_mids={len(uniq)}")
+    # 打印前 20 个最多的
     order = np.argsort(-cnt)
     top = list(zip(uniq[order][:20].tolist(), cnt[order][:20].tolist()))
     print(f"[{name}] top20(mid,count)={top}")
@@ -529,7 +530,8 @@ def proc_step4_kpsts_gen(start_idx, end_idx, org_clip_list, json_fp, args):
 def main_step34_kpst_gen(args):
 
     def step34_gather(start_idx, end_idx, org_clip_list, json_fp, args):
-        # proc_step3_masks_gen(start_idx, end_idx, org_clip_list, args)  
+        if getattr(args, "enable_step3_masks", False):
+            proc_step3_masks_gen(start_idx, end_idx, org_clip_list, args)
         proc_step4_kpsts_gen(start_idx, end_idx, org_clip_list, json_fp, args)
 
     os.makedirs(args.output_root, exist_ok=True)
@@ -590,6 +592,14 @@ if __name__ == "__main__":
     parser.add_argument('--mask_filter_len', type=int, default=1)
     parser.add_argument('--static_threshold', type=float, default=0.02, help='unit: meter')
 
+    parser.add_argument(
+        '--enable_step3_masks',
+        action='store_true',
+        help='Run step3 confident-mask generation before kpst. '
+             'Improves object depth by removing hand-occluded pixels; '
+             'slower. Default off (step4 falls back to 2Dseg erode).',
+    )
+
     parser.add_argument('--output_root', type=str, default='./output/hoi4d')
 
     args = parser.parse_args()
@@ -598,6 +608,6 @@ if __name__ == "__main__":
     # main_step2_trajs_gen(args)
     main_step34_kpst_gen(args)
 
-# CUDA_VISIBLE_DEVICES=0 python label_gen.py --data_root  \
-# --anno_root  --idx_file 
-# --output_root 
+# CUDA_VISIBLE_DEVICES=0 python label_gen.py --data_root /home/ljx/文档/work/general_flow/a \
+# --anno_root /home/ljx/文档/work/general_flow/a --idx_file /home/ljx/文档/work/general_flow/a.txt\
+# --output_root /home/ljx/文档/work/general_flow/process_data/debug_data

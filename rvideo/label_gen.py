@@ -27,17 +27,7 @@ for p in (_ROOT, _RVIDEO):
 from repo_paths import get_path, load_paths
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-from cotracker.utils.visualizer import Visualizer, read_video_from_path
-from cotracker.predictor import CoTrackerPredictor
 
-
-from sam2.sam2_image_predictor import SAM2ImagePredictor 
-from sam2.build_sam import build_sam2_video_predictor, build_sam2
-
-# from tool_repos.FastSAM.fastsam import FastSAM
-# from fastsam_prompt import FastSAMPrompt
-from dino_hoi_detector import GroundingDINODetector
-from ego_hoi_detector import EgoHOIDetector  # legacy
 import traceback
 import matplotlib.pyplot as plt
 
@@ -46,7 +36,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import cv2
 
-from utils import remove_fly_points_xyzrgb, filter_bg_remove_islands, filter_kpst_long_trajectories
+from utils import (
+    remove_fly_points_xyzrgb,
+    filter_bg_remove_islands,
+    filter_kpst_long_trajectories,
+    apply_global_se3,
+)
 
 
 def get_camera(camera_in, W, H):
@@ -89,6 +84,12 @@ class EgoHOIAnalysts(object):
                  sam2_checkpoint=None,
                  sam2_config=None,
                  ):
+
+        from cotracker.predictor import CoTrackerPredictor
+        from sam2.sam2_image_predictor import SAM2ImagePredictor
+        from sam2.build_sam import build_sam2
+        from dino_hoi_detector import GroundingDINODetector
+        from ego_hoi_detector import EgoHOIDetector
 
         cfg = load_paths()
         self.device = device
@@ -714,6 +715,7 @@ class EgoHOIAnalysts(object):
         pred_tracks, pred_visibility = self.kps_tracker(video.float(), queries=query[None].float())
 
         if vis_dir is not None:
+            from cotracker.utils.visualizer import Visualizer
             vis = Visualizer(save_dir=vis_dir, linewidth=3, mode='cool', tracks_leave_trace=-1)
             vis.visualize(video=video, tracks=pred_tracks, visibility=pred_visibility, filename='queries')
         
@@ -901,12 +903,48 @@ def discover_gt_task_roots(root: str) -> list[str]:
 
 
 DEPTH_BASE_FP_ALIASES = (
-    ("", ""),
+    ("/media/ljx/UBU/data/recorded_rgbd/", "/media/ljx/UBU/data/Record/"),
+)
+
+RECORD_ROOT_PREFIXES = (
+    "/media/ljx/UBU/data/Record",
+    "/media/ljx/UBU/data/recorded_rgbd",
 )
 
 
+def resolve_traj_root(base_fp: str, record_root: str | None = None) -> str | None:
+    """Return the first traj folder that contains camera_in.npy."""
+    candidates: list[str] = []
+    norm = os.path.normpath(base_fp)
+
+    if record_root:
+        record_root = os.path.normpath(record_root)
+        for prefix in RECORD_ROOT_PREFIXES:
+            pnorm = os.path.normpath(prefix)
+            if norm == pnorm or norm.startswith(pnorm + os.sep):
+                rel = norm[len(pnorm):].lstrip(os.sep)
+                candidates.append(os.path.join(record_root, rel))
+
+    candidates.append(norm)
+    for src, dst in DEPTH_BASE_FP_ALIASES:
+        src_n = os.path.normpath(src)
+        dst_n = os.path.normpath(dst)
+        if norm.startswith(src_n):
+            candidates.append(os.path.normpath(dst_n + norm[len(src_n):]))
+        elif norm.startswith(dst_n):
+            candidates.append(os.path.normpath(src_n + norm[len(dst_n):]))
+
+    seen: set[str] = set()
+    for cand in candidates:
+        if cand in seen:
+            continue
+        seen.add(cand)
+        if os.path.isfile(os.path.join(cand, "camera_in.npy")):
+            return cand
+    return None
+
+
 def depth_base_fp_candidates(base_fp: str) -> list[str]:
-    """Same traj may exist under recorded_rgbd and Record; refined may only be on Record."""
     out = [base_fp]
     norm = os.path.normpath(base_fp)
     for src, dst in DEPTH_BASE_FP_ALIASES:
@@ -1193,6 +1231,7 @@ def gripperify_hand_contact_shell(
         idx = np.array([], dtype=np.int64)
         while True:
             thr = float(np.quantile(d, q_cur))
+            # 注意：这里要对 tool_xyz2 的距离做阈值，而不是对 d(已过滤) 做阈值
             d_full, _ = cKDTree(obj_xyz2).query(tool_xyz2, k=1, workers=-1)
             idx = np.where(np.isfinite(d_full) & (d_full <= thr))[0]
 
@@ -1207,7 +1246,7 @@ def gripperify_hand_contact_shell(
         out_xyz = tool_xyz2[idx]
         out_rgb = tool_rgb2[idx] if tool_rgb2 is not None else tool_rgb2
         if return_idx:
-            return out_xyz, out_rgb, idx, tool_xyz2, tool_rgb2
+            return out_xyz, out_rgb, idx, tool_xyz2, tool_rgb2  # 把 tool_xyz2 也回传，方便做补集
         return out_xyz, out_rgb
 
 
@@ -1472,6 +1511,8 @@ def kpst_label_gen_demo_3d(args):
     prior_3d = load_metadata_3d_clips(args.save_root)
     clip_list = []
     n_skip_incomplete = 0
+    n_skip_missing_raw = 0
+    record_root = getattr(args, "record_root", None) or os.environ.get("RECORD_ROOT")
     if use_refined_depth:
         print("[3D] using LingBot refined depth (depth_refined_*.png/npy)")
     for _, clip_org in tqdm(enumerate(org_clip_list)):
@@ -1490,13 +1531,20 @@ def kpst_label_gen_demo_3d(args):
                 print(f"[Skip] incomplete step1_2d clip {clip_org['id']}: {step_fp}")
             continue
 
-        base_fp = clip_org['index']
+        base_fp_orig = clip_org['index']
+        base_fp = resolve_traj_root(base_fp_orig, record_root)
+        if base_fp is None:
+            n_skip_missing_raw += 1
+            print(f"[Skip] raw RGB-D not found: {base_fp_orig}")
+            if os.path.isfile(kpst_fp):
+                clip_list.append(prior_3d.get(clip_org['id'], clip_org))
+            continue
+        if base_fp != os.path.normpath(base_fp_orig):
+            print(f"[Remap] {base_fp_orig} -> {base_fp}")
+
         os.makedirs(save_fp, exist_ok=True)
 
-        # camera_in = np.load(os.path.join(base_fp, f"camera_in.npy"))
-        # camera = get_camera(camera_in)
-
-        camera_in = np.load(os.path.join(base_fp, f"camera_in.npy"))
+        camera_in = np.load(os.path.join(base_fp, "camera_in.npy"))
 
         # use REAL image size from depth (or rgb) to build intrinsic
         st = int(clip_org['st'])
@@ -1714,6 +1762,7 @@ def kpst_label_gen_demo_3d(args):
             min_neighbors=int(getattr(args, "bg_ror_min_nb", 4)),
         )
 
+        # 前景 = tool + other
         fg_xyz = np.concatenate([tool_xyz, other_xyz], axis=0)
 
         bg_xyz, bg_rgb = filter_bg_remove_islands(
@@ -1755,6 +1804,7 @@ def kpst_label_gen_demo_3d(args):
                 relax=0.4,
                 q_max=0.80,
             )
+            # 后续 pcd 也用过滤后的 hand
             tool_xyz, tool_rgb = tool_xyz_filt, tool_rgb_filt
 
         elif not other_only:
@@ -1764,13 +1814,15 @@ def kpst_label_gen_demo_3d(args):
                 if mask_hand.ndim == 3:
                     mask_hand = mask_hand[0]
 
+                # hand 点云（来自 hand mask，不是 tool）
                 hand_xyz, hand_rgb = _pcd_from_mask(mask_hand)
 
                 if hand_xyz.shape[0] > 0 and tool_xyz.shape[0] > 0:
+                    # 3D 上夹爪化：hand 中保留靠近 tool 的壳层
                     hand_grip_xyz, hand_grip_rgb, idx_keep, hand_xyz2, hand_rgb2 = gripperify_hand_contact_shell(
                         tool_xyz=hand_xyz,
                         tool_rgb=hand_rgb,
-                        obj_xyz=tool_xyz,
+                        obj_xyz=tool_xyz,   # 参考 = tool（你之前要求“离 tool 最近”）
                         q_contact=float(getattr(args, "hand_q_contact", 0.10)),
                         min_pts=int(getattr(args, "hand_min_pts", 80)),
                         relax=float(getattr(args, "hand_relax", 0.15)),
@@ -1778,11 +1830,13 @@ def kpst_label_gen_demo_3d(args):
                         return_idx=True,
                     )
 
+                    # rest = hand - grip（严格补集）
                     keep_mask = np.zeros((hand_xyz2.shape[0],), dtype=bool)
                     if idx_keep is not None and idx_keep.size > 0:
                         keep_mask[idx_keep] = True
                     hand_rest_xyz = hand_xyz2[~keep_mask]
 
+                    # 把 hand_rest 投影回 2D，生成 rest mask
                     if hand_rest_xyz.shape[0] > 0:
                         cx, cy, fx, fy = get_intrinsic_parameter(camera_in)
 
@@ -1795,16 +1849,18 @@ def kpst_label_gen_demo_3d(args):
                         u = np.round(fx * (X / Z) + cx).astype(np.int32)
                         v = np.round(fy * (Y / Z) + cy).astype(np.int32)
 
-                        Hm, Wm = mask_tool.shape[:2]
+                        Hm, Wm = mask_tool.shape[:2]   # mask 分辨率
                         u = np.clip(u, 0, Wm - 1)
                         v = np.clip(v, 0, Hm - 1)
 
                         mask_hand_rest2d = np.zeros((Hm, Wm), dtype=np.uint8)
                         mask_hand_rest2d[v, u] = 1
 
+                        # bg = bg - hand_rest（严格 2D 集合差）
                         mask_bg_clean = (mask_bg & (mask_hand_rest2d == 0))
                         bg_xyz, bg_rgb = _pcd_from_mask(mask_bg_clean.astype(np.uint8))
 
+            # 再调用一次GroundingDINO，检测一次hand，然后依然将手类夹爪化
 
 
 
@@ -1858,9 +1914,10 @@ def kpst_label_gen_demo_3d(args):
                       [0.0, 0.0, 1.0]], dtype=np.float32)
         t = (np.random.randn(3).astype(np.float32) * float(args.aug_trans_std))
 
-        tool_xyz = (tool_xyz @ R.T) + t
-        other_xyz = (other_xyz @ R.T) + t
-        bg_xyz = (bg_xyz @ R.T) + t
+        tool_xyz = apply_global_se3(tool_xyz, R, t)
+        other_xyz = apply_global_se3(other_xyz, R, t)
+        bg_xyz = apply_global_se3(bg_xyz, R, t)
+        kpst_3d = apply_global_se3(kpst_3d, R, t)
 
         tool_xyz = tool_xyz + np.random.randn(*tool_xyz.shape).astype(np.float32) * float(args.aug_jitter_std)
         other_xyz = other_xyz + np.random.randn(*other_xyz.shape).astype(np.float32) * float(args.aug_jitter_std)
@@ -1899,6 +1956,8 @@ def kpst_label_gen_demo_3d(args):
 
     if n_skip_incomplete:
         print(f"[3D] skipped {n_skip_incomplete} clip(s) with incomplete step1_2d")
+    if n_skip_missing_raw:
+        print(f"[3D] skipped {n_skip_missing_raw} clip(s) with missing raw RGB-D (mount disk or set --record_root)")
 
     fp = os.path.join(args.save_root, 'metadata_egosoft_demo.json')
     with open(fp, 'w') as f:
@@ -1932,7 +1991,7 @@ if __name__ == "__main__":
     parser.add_argument('--aug_trans_std', type=float, default=0.0)
     parser.add_argument('--aug_jitter_std', type=float, default=0.002)
 
-    parser.add_argument('--raw_data_root', type=str, required=True, help='Root of human RGB-D trajectories')
+    parser.add_argument('--raw_data_root', type=str, default=None, help='Root of human RGB-D trajectories (required unless --only_3d)')
     parser.add_argument('--save_root', type=str, default='./output/rvideo')
     parser.add_argument(
         '--task_name',
@@ -1993,6 +2052,13 @@ if __name__ == "__main__":
         default=None,
         help='With --only_3d: batch all GT tasks under this root (e.g. process_data)',
     )
+    parser.add_argument(
+        '--record_root',
+        type=str,
+        default=None,
+        help='Remap /media/ljx/UBU/data/Record to this path when the UBU disk is mounted elsewhere '
+             '(or set env RECORD_ROOT)',
+    )
     args = parser.parse_args()
 
     os.makedirs(args.save_root, exist_ok=True)
@@ -2014,6 +2080,8 @@ if __name__ == "__main__":
             print(f"\n======== 3D: {gt_root} ========")
             kpst_label_gen_demo_3d(args)
     else:
+        if not args.raw_data_root:
+            parser.error('--raw_data_root is required unless --only_3d is set')
         analysts = EgoHOIAnalysts(downsample_ratio=args.downsample_ratio, device=args.device)
         kpst_label_gen_demo_2d(analysts, args)
         kpst_label_gen_demo_3d(args)

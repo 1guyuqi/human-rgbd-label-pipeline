@@ -2,6 +2,16 @@ import numpy as np
 import open3d as o3d
 
 
+def apply_global_se3(xyz: np.ndarray, R: np.ndarray, t: np.ndarray) -> np.ndarray:
+    """Apply the same global rotation and translation to Nx3 or NxTx3 points."""
+    t = np.asarray(t, dtype=np.float32).reshape(3)
+    if xyz.ndim == 2:
+        return (xyz @ R.T) + t
+    if xyz.ndim == 3:
+        return (xyz @ R.T) + t.reshape(1, 1, 3)
+    raise ValueError(f"apply_global_se3 expects 2D or 3D array, got shape {xyz.shape}")
+
+
 def filter_kpst_long_trajectories(
     kpst_3d: np.ndarray,
     max_total_len: float = 0.60,

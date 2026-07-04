@@ -63,8 +63,10 @@ python label_gen.py --data_root /path/to/HOI4D_release \
   --output_root ../output/hoi4d
 # Uncomment main_step1_clips_gen / main_step2_trajs_gen in label_gen.py as needed
 
-# Step 3–4: masks + kpst (default entry point)
+# Step 3–4: kpst from human 6D pose (default entry point)
 python label_gen.py --data_root ... --anno_root ... --idx_file ... --output_root ../output/hoi4d
+# Optional: enable step3 confident masks (better object pcd, slower)
+# python label_gen.py ... --enable_step3_masks
 
 # Step 5–6: merge shards + train/val/test split
 python label_gen_merge.py --output_root ../output/hoi4d
@@ -76,8 +78,11 @@ python label_gen_merge.py --output_root ../output/hoi4d
 |------|----------|------------------------|
 | 1 | `main_step1_clips_gen` | Action mark JSON → clip `[st, ed]` |
 | 2 | `main_step2_trajs_gen` | Object 6D pose annotations → per-frame transforms |
-| 3–4 | `main_step34_kpst_gen` | Motion segmentation + depth → hand/obj masks, CoTracker kpst |
+| 3 | `proc_step3_masks_gen` (optional, `--enable_step3_masks`) | HOI4D 2Dseg + camera extrinsics → temporally fused `confident_mask_*.npy` |
+| 4 | `proc_step4_kpsts_gen` | Sample object points from semantic pcd; propagate with **annotated 6D pose** (not CoTracker) |
 | 5–6 | `label_gen_merge.py` | Merge JSON caches, split by object instance |
+
+**Note:** HOI4D kpst trajectories come from official object-pose annotations (`camera_coord_transformation`), not from CoTracker. Step 3 is off by default; step 4 still builds `pcd.npy` using HOI4D 2Dseg with a simpler erode fallback when confident masks are absent.
 
 ## Pipeline B — Custom human RGB-D videos
 
@@ -156,6 +161,44 @@ output/rvideo/my_task/
 ├── config/paths.example.yaml
 └── repo_paths.py
 ```
+
+## Smoke test (minimal example)
+
+No GPU or external model weights required for the 3D-only path:
+
+```bash
+python scripts/create_minimal_fixture.py
+python scripts/run_minimal_smoke_test.py
+```
+
+This builds a synthetic RGB-D clip, runs `rvideo/label_gen.py --only_3d`, and checks:
+
+- `examples/minimal_rvideo/output/data/0/pcd.npy`
+- `examples/minimal_rvideo/output/data/0/kpst_traj.npy`
+- `examples/minimal_rvideo/output/metadata_egosoft_demo.json` (per-clip metadata; smoke test also writes `metadata.json`)
+
+## Re-align existing RVideo 3D exports
+
+If you generated `pcd.npy` before the kpst/pcd SE(3) fix, re-run 3D only (2D caches unchanged):
+
+```bash
+# Mount UBU disk first, then:
+export RECORD_ROOT=/media/ljx/UBU/data/Record
+
+bash scripts/batch_recompute_3d.sh
+# or single task:
+cd rvideo && python label_gen.py \
+  --save_root /path/to/process_data/TASK \
+  --only_3d --recompute_3d --record_root "$RECORD_ROOT"
+```
+
+Local copy under `~/文档/work/general_flow/`:
+
+```bash
+bash ~/文档/work/general_flow/scripts/recompute_3d_all.sh
+```
+
+GitHub hosts the public repo; keep `/home/ljx/code/human-rgbd-label-pipeline` as your working copy for re-runs.
 
 ## Related repos
 
