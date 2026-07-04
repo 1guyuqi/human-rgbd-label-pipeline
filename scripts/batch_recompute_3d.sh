@@ -3,8 +3,8 @@
 # Requires raw RGB-D on disk (mount UBU or set RECORD_ROOT).
 set -euo pipefail
 
-PIPELINE_ROOT="${PIPELINE_ROOT:-/home/ljx/code/human-rgbd-label-pipeline}"
-GT_ROOT="${GT_ROOT:-/home/ljx/文档/work/general_flow/process_data}"
+PIPELINE_ROOT="${PIPELINE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+GT_ROOT="${GT_ROOT:-./process_data}"
 PYTHON="${PYTHON:-python}"
 
 EXTRA_ARGS=()

@@ -198,7 +198,7 @@ Local copy under `~/文档/work/general_flow/`:
 bash ~/文档/work/general_flow/scripts/recompute_3d_all.sh
 ```
 
-GitHub hosts the public repo; keep `/home/ljx/code/human-rgbd-label-pipeline` as your working copy for re-runs.
+GitHub hosts the public repo; keep a local clone as your working copy for re-runs.
 
 ## Related repos
 

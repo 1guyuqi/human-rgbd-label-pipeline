@@ -51,9 +51,11 @@ cls_name = {
 }
 large_static_multipart = ['Storage Furniture', 'Laptop', 'Safe', 'Trash Can', 'Bucket']
 
-# CUDA_VISIBLE_DEVICES=0 python label_gen.py --data_root /media/ljx/UBU/data/HOI4D/HOI4D_release \
-# --anno_root /media/ljx/UBU/data/HOI4D/HOI4D_annotations --idx_file /media/ljx/UBU/data/HOI4D/HOI4D-Instructions/release.txt\
-# --output_root "/home/ljx/文档/work/general_flow/process_data/HOI4D"
+# Example:
+# python label_gen.py --data_root /path/to/HOI4D_release \
+#   --anno_root /path/to/HOI4D_annotations \
+#   --idx_file /path/to/release.txt \
+#   --output_root ./output/hoi4d
 
 
 def _stat_spcd(name, spcd, ids=None):
@@ -64,7 +66,7 @@ def _stat_spcd(name, spcd, ids=None):
     uniq, cnt = np.unique(mid, return_counts=True)
     total = int(spcd.shape[0])
     print(f"[{name}] total={total}, uniq_mids={len(uniq)}")
-    # 打印前 20 个最多的
+    # top 20 labels by count
     order = np.argsort(-cnt)
     top = list(zip(uniq[order][:20].tolist(), cnt[order][:20].tolist()))
     print(f"[{name}] top20(mid,count)={top}")
@@ -607,7 +609,3 @@ if __name__ == "__main__":
     # main_step1_clips_gen(args)
     # main_step2_trajs_gen(args)
     main_step34_kpst_gen(args)
-
-# CUDA_VISIBLE_DEVICES=0 python label_gen.py --data_root /home/ljx/文档/work/general_flow/a \
-# --anno_root /home/ljx/文档/work/general_flow/a --idx_file /home/ljx/文档/work/general_flow/a.txt\
-# --output_root /home/ljx/文档/work/general_flow/process_data/debug_data

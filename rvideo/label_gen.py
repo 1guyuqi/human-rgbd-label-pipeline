@@ -916,10 +916,52 @@ RECORD_ROOT_PREFIXES = (
 )
 
 
+def _symlink_record_candidates(traj_dir: str, record_root: str | None) -> list[str]:
+    """Remap broken staging symlinks via RECORD_ROOT (match path after .../Record/)."""
+    if not record_root:
+        return []
+    cam = os.path.join(traj_dir, "camera_in.npy")
+    if not os.path.islink(cam):
+        return []
+    target = os.readlink(cam)
+    if not os.path.isabs(target):
+        target = os.path.normpath(os.path.join(os.path.dirname(cam), target))
+    target = os.path.normpath(target)
+    record_root = os.path.normpath(record_root)
+    marker = os.sep + "Record" + os.sep
+    idx = target.find(marker)
+    if idx >= 0:
+        rel = target[idx + len(marker):]
+        return [os.path.dirname(os.path.join(record_root, rel))]
+    out: list[str] = []
+    for prefix in RECORD_ROOT_PREFIXES:
+        pnorm = os.path.normpath(prefix)
+        pmarker = pnorm + os.sep
+        if target.startswith(pmarker):
+            rel = target[len(pmarker):]
+            out.append(os.path.dirname(os.path.join(record_root, rel)))
+            break
+    return out
+
+
+def _traj_root_ready(traj_dir: str) -> bool:
+    cam = os.path.join(traj_dir, "camera_in.npy")
+    return os.path.isfile(cam)
+
+
+def _missing_raw_hint(base_fp: str) -> str:
+    cam = os.path.join(base_fp, "camera_in.npy")
+    if os.path.islink(cam) and not os.path.exists(cam):
+        return f"{base_fp} (broken symlink -> {os.readlink(cam)}; mount disk or set RECORD_ROOT)"
+    return base_fp
+
+
 def resolve_traj_root(base_fp: str, record_root: str | None = None) -> str | None:
-    """Return the first traj folder that contains camera_in.npy."""
+    """Return the first traj folder that contains a readable camera_in.npy."""
     candidates: list[str] = []
     norm = os.path.normpath(base_fp)
+
+    candidates.extend(_symlink_record_candidates(norm, record_root))
 
     if record_root:
         record_root = os.path.normpath(record_root)
@@ -943,7 +985,7 @@ def resolve_traj_root(base_fp: str, record_root: str | None = None) -> str | Non
         if cand in seen:
             continue
         seen.add(cand)
-        if os.path.isfile(os.path.join(cand, "camera_in.npy")):
+        if _traj_root_ready(cand):
             return cand
     return None
 
@@ -1235,7 +1277,7 @@ def gripperify_hand_contact_shell(
         idx = np.array([], dtype=np.int64)
         while True:
             thr = float(np.quantile(d, q_cur))
-            # 注意：这里要对 tool_xyz2 的距离做阈值，而不是对 d(已过滤) 做阈值
+            # Threshold distance on full tool_xyz2, not on the filtered subset d.
             d_full, _ = cKDTree(obj_xyz2).query(tool_xyz2, k=1, workers=-1)
             idx = np.where(np.isfinite(d_full) & (d_full <= thr))[0]
 
@@ -1250,7 +1292,7 @@ def gripperify_hand_contact_shell(
         out_xyz = tool_xyz2[idx]
         out_rgb = tool_rgb2[idx] if tool_rgb2 is not None else tool_rgb2
         if return_idx:
-            return out_xyz, out_rgb, idx, tool_xyz2, tool_rgb2  # 把 tool_xyz2 也回传，方便做补集
+            return out_xyz, out_rgb, idx, tool_xyz2, tool_rgb2  # return full tool cloud for set-difference
         return out_xyz, out_rgb
 
 
@@ -1539,7 +1581,7 @@ def kpst_label_gen_demo_3d(args):
         base_fp = resolve_traj_root(base_fp_orig, record_root)
         if base_fp is None:
             n_skip_missing_raw += 1
-            print(f"[Skip] raw RGB-D not found: {base_fp_orig}")
+            print(f"[Skip] raw RGB-D not found: {_missing_raw_hint(base_fp_orig)}")
             if os.path.isfile(kpst_fp):
                 clip_list.append(prior_3d.get(clip_org['id'], clip_org))
             continue
@@ -1766,7 +1808,7 @@ def kpst_label_gen_demo_3d(args):
             min_neighbors=int(getattr(args, "bg_ror_min_nb", 4)),
         )
 
-        # 前景 = tool + other
+        # foreground = tool + other
         fg_xyz = np.concatenate([tool_xyz, other_xyz], axis=0)
 
         bg_xyz, bg_rgb = filter_bg_remove_islands(
@@ -1808,7 +1850,7 @@ def kpst_label_gen_demo_3d(args):
                 relax=0.4,
                 q_max=0.80,
             )
-            # 后续 pcd 也用过滤后的 hand
+            # use gripperified hand for downstream pcd as well
             tool_xyz, tool_rgb = tool_xyz_filt, tool_rgb_filt
 
         elif not other_only:
@@ -1818,15 +1860,15 @@ def kpst_label_gen_demo_3d(args):
                 if mask_hand.ndim == 3:
                     mask_hand = mask_hand[0]
 
-                # hand 点云（来自 hand mask，不是 tool）
+                # hand point cloud from hand mask (not tool mask)
                 hand_xyz, hand_rgb = _pcd_from_mask(mask_hand)
 
                 if hand_xyz.shape[0] > 0 and tool_xyz.shape[0] > 0:
-                    # 3D 上夹爪化：hand 中保留靠近 tool 的壳层
+                    # gripperify in 3D: keep hand shell near tool
                     hand_grip_xyz, hand_grip_rgb, idx_keep, hand_xyz2, hand_rgb2 = gripperify_hand_contact_shell(
                         tool_xyz=hand_xyz,
                         tool_rgb=hand_rgb,
-                        obj_xyz=tool_xyz,   # 参考 = tool（你之前要求“离 tool 最近”）
+                        obj_xyz=tool_xyz,   # reference object = tool (nearest-neighbor shell)
                         q_contact=float(getattr(args, "hand_q_contact", 0.10)),
                         min_pts=int(getattr(args, "hand_min_pts", 80)),
                         relax=float(getattr(args, "hand_relax", 0.15)),
@@ -1834,13 +1876,13 @@ def kpst_label_gen_demo_3d(args):
                         return_idx=True,
                     )
 
-                    # rest = hand - grip（严格补集）
+                    # rest = hand - grip (strict complement)
                     keep_mask = np.zeros((hand_xyz2.shape[0],), dtype=bool)
                     if idx_keep is not None and idx_keep.size > 0:
                         keep_mask[idx_keep] = True
                     hand_rest_xyz = hand_xyz2[~keep_mask]
 
-                    # 把 hand_rest 投影回 2D，生成 rest mask
+                    # project hand_rest back to 2D for bg cleanup
                     if hand_rest_xyz.shape[0] > 0:
                         cx, cy, fx, fy = get_intrinsic_parameter(camera_in)
 
@@ -1853,18 +1895,18 @@ def kpst_label_gen_demo_3d(args):
                         u = np.round(fx * (X / Z) + cx).astype(np.int32)
                         v = np.round(fy * (Y / Z) + cy).astype(np.int32)
 
-                        Hm, Wm = mask_tool.shape[:2]   # mask 分辨率
+                        Hm, Wm = mask_tool.shape[:2]
                         u = np.clip(u, 0, Wm - 1)
                         v = np.clip(v, 0, Hm - 1)
 
                         mask_hand_rest2d = np.zeros((Hm, Wm), dtype=np.uint8)
                         mask_hand_rest2d[v, u] = 1
 
-                        # bg = bg - hand_rest（严格 2D 集合差）
+                        # bg = bg minus hand_rest (strict 2D set difference)
                         mask_bg_clean = (mask_bg & (mask_hand_rest2d == 0))
                         bg_xyz, bg_rgb = _pcd_from_mask(mask_bg_clean.astype(np.uint8))
 
-            # 再调用一次GroundingDINO，检测一次hand，然后依然将手类夹爪化
+            # optional: re-detect hand with GroundingDINO then gripperify
 
 
 
