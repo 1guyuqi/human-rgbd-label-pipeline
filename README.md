@@ -164,14 +164,14 @@ output/rvideo/my_task/
 
 ## Smoke test (minimal example)
 
-No GPU or external model weights required for the 3D-only path:
+No GPU or external model weights required. **Sample images are not bundled in the repo**; the script generates a tiny synthetic clip locally:
 
 ```bash
 python scripts/create_minimal_fixture.py
 python scripts/run_minimal_smoke_test.py
 ```
 
-This builds a synthetic RGB-D clip, runs `rvideo/label_gen.py --only_3d`, and checks:
+This verifies the 3D export path and checks:
 
 - `examples/minimal_rvideo/output/data/0/pcd.npy`
 - `examples/minimal_rvideo/output/data/0/kpst_traj.npy`

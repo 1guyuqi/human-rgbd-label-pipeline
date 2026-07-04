@@ -8,6 +8,7 @@ venv/
 # Pipeline outputs (large)
 output/
 examples/minimal_rvideo/output/
+examples/minimal_rvideo/traj_*/
 data/
 json_cache/
 cache/
