@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from __future__ import annotations
-
 import os
 import torch
-import pdb
 import numpy as np 
 import pandas as pd
 from tqdm import tqdm
@@ -34,11 +31,6 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 import traceback
 import matplotlib.pyplot as plt
-
-# FPS = 15
-
-import numpy as np
-import cv2
 
 from utils import (
     remove_fly_points_xyzrgb,

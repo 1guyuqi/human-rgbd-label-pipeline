@@ -159,6 +159,10 @@ output/rvideo/my_task/
 │   ├── dino_hoi_detector.py
 │   └── utils.py
 ├── config/paths.example.yaml
+├── scripts/
+│   ├── batch_recompute_3d.sh    # batch 3D re-export (set GT_ROOT + RECORD_ROOT)
+│   ├── create_minimal_fixture.py
+│   └── run_minimal_smoke_test.py
 └── repo_paths.py
 ```
 
@@ -182,6 +186,7 @@ This verifies the 3D export path and checks:
 If you generated `pcd.npy` before the kpst/pcd SE(3) fix, re-run 3D only (2D caches unchanged):
 
 ```bash
+export GT_ROOT=/path/to/process_data          # parent of task folders with step1_kpst_2d_info.json
 export RECORD_ROOT=/path/to/Record
 export RECORDED_RGBD_ROOT=/path/to/recorded_rgbd   # optional alias / fallback
 

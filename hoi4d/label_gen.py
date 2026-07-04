@@ -2,7 +2,6 @@ import argparse
 import json
 import sys
 import os
-import pdb 
 from PIL import Image
 import random
 
@@ -56,24 +55,6 @@ large_static_multipart = ['Storage Furniture', 'Laptop', 'Safe', 'Trash Can', 'B
 #   --anno_root /path/to/HOI4D_annotations \
 #   --idx_file /path/to/release.txt \
 #   --output_root ./output/hoi4d
-
-
-def _stat_spcd(name, spcd, ids=None):
-    if spcd is None:
-        print(f"[{name}] spcd=None")
-        return
-    mid = spcd[:, 6].astype(np.int32)
-    uniq, cnt = np.unique(mid, return_counts=True)
-    total = int(spcd.shape[0])
-    print(f"[{name}] total={total}, uniq_mids={len(uniq)}")
-    # top 20 labels by count
-    order = np.argsort(-cnt)
-    top = list(zip(uniq[order][:20].tolist(), cnt[order][:20].tolist()))
-    print(f"[{name}] top20(mid,count)={top}")
-    if ids is not None:
-        ids = [int(x) for x in ids]
-        s = {int(u): int(c) for u, c in zip(uniq, cnt)}
-        print(f"[{name}] query_ids={ids} -> counts={[s.get(i,0) for i in ids]}")
 
 
 def main_step1_clips_gen(args):
@@ -422,7 +403,6 @@ def proc_step4_kpsts_gen(start_idx, end_idx, org_clip_list, json_fp, args):
     zero_trans = np.array([0,0,0])
 
     for idx_clip_info, org_clip in tqdm(enumerate(org_clip_list[start_idx:end_idx])):
-        print("******************8")
         idx_clip = int(idx_clip_info + start_idx)
 
         if org_clip['index'] == 'ZY20210800004/H4/C5/N15/S56/s02/T1':
@@ -456,20 +436,17 @@ def proc_step4_kpsts_gen(start_idx, end_idx, org_clip_list, json_fp, args):
         cls = get_class(org_clip['index'])
 
         transformation = org_clip['camera_coord_transformation']
-        print("cls_name:", cls_name[cls])
 
         obj_has = []
         for obj in transformation:
             obj_name = obj['label']
-            print("obj_name: ", obj_name)
             if obj_name in obj_has:      # only pick the first active object.
                 continue
             mseg_info = objpose2mseg(cls, obj_name, num=0)
             if not mseg_info:
                 continue
             obj_mseg_idx, obj_mseg_part = mseg_info
-            
-            _stat_spcd("[debug:]", spcd, [obj_mseg_idx])
+
             filtered_rows = spcd[np.abs(spcd[:, 6] - obj_mseg_idx) <= 0.01]
             if filtered_rows.shape[0] <= 0:
                 continue
@@ -520,8 +497,6 @@ def proc_step4_kpsts_gen(start_idx, end_idx, org_clip_list, json_fp, args):
 
         np.save(os.path.join(output_dir_fp, 'kpst_traj.npy'), kpst_traj)
         np.save(os.path.join(output_dir_fp, 'kpst_part_id.npy'), kpst_part_id)
-        # break
-        print("save success!")
         clip_list.append(clip)
 
     fp = os.path.join(json_fp, 'step3_clips_kpst_'+str(start_idx)+'_'+str(end_idx-1)+'.json')

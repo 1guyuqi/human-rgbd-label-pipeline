@@ -2,7 +2,6 @@ from scipy.spatial.transform import Rotation as Rt
 from tqdm import tqdm
 import numpy as np
 import argparse
-import pdb
 import json
 import os
 from plyfile import PlyData, PlyElement
@@ -140,10 +139,10 @@ def test_vec_mat_transform():
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_root', type=str, default='/public/datasets_yl/HOI4D/')
-    parser.add_argument('--anno_root', type=str, default='/public/datasets_yl/HOI4D_annotations/')
-    parser.add_argument('--idx_file', type=str, default='HOI4D-Instructions/release.txt')
-    parser.add_argument('--output_root', type=str, default='HOI4D_KPST')
+    parser.add_argument('--data_root', type=str, default='/path/to/HOI4D_release')
+    parser.add_argument('--anno_root', type=str, default='/path/to/HOI4D_annotations')
+    parser.add_argument('--idx_file', type=str, default='/path/to/release.txt')
+    parser.add_argument('--output_root', type=str, default='./output/hoi4d')
     args = parser.parse_args()
 
     # get_all_obj_pose_label(args)

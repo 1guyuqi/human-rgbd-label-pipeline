@@ -10,7 +10,6 @@ import imageio
 import os
 import numpy as np
 import argparse
-import pdb
 import cv2
 import torch
 from PIL import Image
@@ -23,10 +22,6 @@ from PIL import Image
 # from model.rpn.bbox_transform import bbox_transform_inv
 # from model.utils.blob import im_list_to_blob
 # from model.faster_rcnn.resnet import resnet
-import pdb
-from PIL import Image, ImageDraw, ImageFont
-
-import pdb
 from PIL import Image, ImageDraw, ImageFont
 import tqdm
 xrange = range  # Python 3

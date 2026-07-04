@@ -177,10 +177,13 @@ def main():
 
     print(f"[OK] saved step1_2d -> {save_fp}")
     print("       mark.jpg, mask_*.npy, kps_tracks.npy, queries_pred_track.mp4")
-    print("\nNext (3D GT + vis):")
-    print(f"  rm -rf {args.save_root}/data/{args.clip_id}")
-    print(f"  python data/RVideo/label_gen_demo_dino_modified.py \\")
-    print(f"    --only_3d --append_new --save_root {args.save_root} --static_threshold 0.005")
+    print("\nNext (3D GT refresh for this clip):")
+    print(f"  cd {_RVIDEO}")
+    print("  python label_gen.py \\")
+    print("    --only_3d --recompute_3d \\")
+    print(f"    --save_root {args.save_root} \\")
+    print('    --record_root "$RECORD_ROOT" \\')
+    print('    --recorded_rgbd_root "$RECORDED_RGBD_ROOT"')
 
 
 if __name__ == "__main__":
